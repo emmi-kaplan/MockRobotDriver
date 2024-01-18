@@ -1,3 +1,6 @@
+# DO
+# - Network manager
+
 import time
 from enum import Enum
 import socket
@@ -53,6 +56,9 @@ class MockRobotDriver:
         self.port = 1000
         self.socket = None
         self.selector = selectors.DefaultSelector()
+        self.valid_names = ["Destination Location", "Source Location"]
+        # I made up this range :)
+        self.valid_range = range(1,18)
 
     # UI mapped functions
     def OpenConnection(self, ip_address):
@@ -92,7 +98,7 @@ class MockRobotDriver:
 
     def Initialize(self):
         """
-        When a user presses the “Initialize” button, the UI calls this function and expects that
+        UI mapped function. When a user presses the “Initialize” button, the UI calls this function and expects that
         the Device Driver will put the MockRobot into an automation-ready (homed) state.
             Returns:
                     "" : If no error is encountered, an empty string is returned
@@ -128,6 +134,8 @@ class MockRobotDriver:
 
     def ExecuteOperation(self, operation, parameter_names, parameter_values):
         """
+        UI mapped function. When a user presses the “Execute Operation” button, the UI calls this function and expects
+        that the Device Driver will perform an operation determined by the parameter operation.
         Checks the instrument for ready state and parses the operation information into the correct robotic command
             Parameters:
                     operation (Operation): a string of enum type Operation defining which operation is to be completed
@@ -140,6 +148,7 @@ class MockRobotDriver:
                      f"operation: {operation}, "
                      f"parameter_names: {parameter_names}, "
                      f"parameter_values: {parameter_values}")
+
         # Check if instrument is connected before sending request.
         if not self.connected:
             return _not_connected_error()
@@ -153,20 +162,27 @@ class MockRobotDriver:
         if self.current_process is not None:
             return _process_running_error(self.current_process)
 
-        if not isinstance(operation, Operation):
-            logging.error("Error: Invalid operation. Supported operations are Pick, Place, and Transfer.")
-            return "Error: Invalid operation. Supported operations are Pick, Place, and Transfer."
+        # Validate inputs
+        valid = self.validate_inputs(operation, parameter_names, parameter_values)
+        if valid[0]:
+            logging.info(valid[1])
+        else:
+            logging.error(valid[1])
+            # returns validation error to end program
+            return valid[1]
 
         # returns empty string if successful or error message if not
         if operation == Operation.PICK:
-            return self.pick(parameter_values)
+            return self.pick(parameter_values[0])
         elif operation == Operation.PLACE:
-            return self.place(parameter_values)
+            return self.place(parameter_values[0])
         elif operation == Operation.TRANSFER:
             return self.transfer(parameter_names, parameter_values)
 
     def Abort(self):
         """
+        UI mapped function. When a user presses the “Abort” button, the UI calls this function and expects
+        that the Device Driver will terminate communication with the MockRobot.
         Checks the instrument for ready state, then aborts communication and resets connection parameters
             Returns:
                     "" : If no error is encountered, an empty string is returned
@@ -184,6 +200,40 @@ class MockRobotDriver:
         self.homed = False
         logging.info("Connection aborted successfully!")
         return ""
+
+    # Helper functions
+    def validate_inputs(self, operation, parameter_names, parameter_values):
+        """
+        UI mapped function. When a user presses the “Execute Operation” button, the UI calls this function and expects
+        that the Device Driver will perform an operation determined by the parameter operation.
+        Checks the instrument for ready state and parses the operation information into the correct robotic command
+            Parameters:
+                    operation (Operation): a string of enum type Operation defining which operation is to be completed
+                    parameter_names ([str]):  array containing the name of each parameter to be used for the transfer
+                    parameter_values ([int]): array containing the value of each parameter to be used for the transfer
+            Returns:
+                    (bool, str) : True for valid false for invalid, Validation error or validation success message
+        """
+        # validate operation
+        if not isinstance(operation, Operation):
+            logging.error("Validation Error: Invalid operation. Supported operations are Pick, Place, and Transfer.")
+            return False, "Validation Error: Invalid operation. Supported operations are Pick, Place, and Transfer."
+        # validate parameter names
+        for name in parameter_names:
+            if name not in self.valid_names:
+                logging.error(f"Validation Error: Invalid parameter name: {name}. Select from valid names: {self.valid_names}")
+                return False, f"Validation Error: Invalid parameter name: {name}. Select from valid names: {self.valid_names}"
+        # validate parameter values
+        for value in parameter_values:
+            if value not in self.valid_range:
+                logging.error(f"Validation Error: Invalid parameter value: {value}. Select from valid range: {self.valid_range}")
+                return False, f"Validation Error: Invalid parameter value: {value}. Select from valid range: {self.valid_range}"
+
+        # add any other validation here.
+        # Can you pick and place to/from same location?
+        # Can you place before you pick?
+
+        return True, "Inputs validated"
 
     def try_process(self, command, timeout):
         """
@@ -305,6 +355,13 @@ class MockRobotDriver:
             Returns:
                 status (str): the status of the process if error, timeout, or completed
         """
+
+        if self.current_process is None:
+            return "Error: Current process is None. Unexpected state."
+
+        # Initialize status to IN_PROGRESS
+        status = ProcessStatus.IN_PROGRESS
+
         # start a timer
         t0 = t1 = time.time()
         while status != ProcessStatus.FINISHED_SUCCESSFULLY:
