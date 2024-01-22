@@ -58,7 +58,7 @@ class MockRobotDriver:
         self.selector = selectors.DefaultSelector()
         self.valid_names = ["Destination Location", "Source Location"]
         # I made up this range :)
-        self.valid_range = range(1,18)
+        self.valid_range = range(1, 18)
 
     # UI mapped functions
     def OpenConnection(self, ip_address):
@@ -67,7 +67,7 @@ class MockRobotDriver:
         expects the Device Driver to establish a connection with the MockRobot onboard software.
         The software will open a socket on port 1000, which will accept commands sent over TCP/IP.
             Parameters:
-                    ip_address (str): IP address used for connection ex. "127.0.0.1"
+                    ip_address (str): IP address used for connection ex. "127.0.0.0"
             Returns:
                     Empty String : If no error is encountered, an empty string is returned
         """
@@ -111,8 +111,8 @@ class MockRobotDriver:
             self.homed = False
             # I decided we should let them home more than once
             # return "Error: MockRobot already initialized."
-        # Send Initialize command to MockRobot
-        response = self.try_process("home")
+        # Send Initialize command to MockRobot, timeout at 2 minutes
+        response = self.try_process("home", 120)
         # If response is a Process_id, Initialization process commenced successfully. Monitor for completion
         if isinstance(response, int):
             process_id = response
@@ -202,39 +202,6 @@ class MockRobotDriver:
         return ""
 
     # Helper functions
-    def validate_inputs(self, operation, parameter_names, parameter_values):
-        """
-        UI mapped function. When a user presses the “Execute Operation” button, the UI calls this function and expects
-        that the Device Driver will perform an operation determined by the parameter operation.
-        Checks the instrument for ready state and parses the operation information into the correct robotic command
-            Parameters:
-                    operation (Operation): a string of enum type Operation defining which operation is to be completed
-                    parameter_names ([str]):  array containing the name of each parameter to be used for the transfer
-                    parameter_values ([int]): array containing the value of each parameter to be used for the transfer
-            Returns:
-                    (bool, str) : True for valid false for invalid, Validation error or validation success message
-        """
-        # validate operation
-        if not isinstance(operation, Operation):
-            logging.error("Validation Error: Invalid operation. Supported operations are Pick, Place, and Transfer.")
-            return False, "Validation Error: Invalid operation. Supported operations are Pick, Place, and Transfer."
-        # validate parameter names
-        for name in parameter_names:
-            if name not in self.valid_names:
-                logging.error(f"Validation Error: Invalid parameter name: {name}. Select from valid names: {self.valid_names}")
-                return False, f"Validation Error: Invalid parameter name: {name}. Select from valid names: {self.valid_names}"
-        # validate parameter values
-        for value in parameter_values:
-            if value not in self.valid_range:
-                logging.error(f"Validation Error: Invalid parameter value: {value}. Select from valid range: {self.valid_range}")
-                return False, f"Validation Error: Invalid parameter value: {value}. Select from valid range: {self.valid_range}"
-
-        # add any other validation here.
-        # Can you pick and place to/from same location?
-        # Can you place before you pick?
-
-        return True, "Inputs validated"
-
     def try_process(self, command, timeout):
         """
         The driver will attempt to send a command to the robot onboard-software and record response.
@@ -249,10 +216,10 @@ class MockRobotDriver:
 
         """
         try:
-            # Send command to the robot's onboard software
+            # Send command to the robot's onboard software in bytes
             self.socket.send(command.encode())
             logging.info(f"Command sent: {command}")
-            # Wait for the socket to be ready for response
+            # Wait for the socket to be ready for response or timeout
             events = self.selector.select(timeout=1)
             if events:
                 response = self.socket.recv(1024).decode()
@@ -275,10 +242,14 @@ class MockRobotDriver:
             return f"Error: Failed to start process: {str(e)}"
 
         # now that we know the process started, we monitor for completion
-        status = self.monitor_process_completion(process_id, 300)
+        status = self.monitor_process_completion(process_id, timeout)
         if status == ProcessStatus.FINISHED_SUCCESSFULLY:
             logging.info(f"Process: {process_id} finished successfully!")
             return ""
+        # return error status is process did not finish successfully
+        else:
+            logging.error(f"Error: Process: {process_id} {status}")
+            return status
 
     def pick(self, source_location):
         """
@@ -348,7 +319,7 @@ class MockRobotDriver:
 
     def monitor_process_completion(self, process_id, timeout) -> str:
         """
-        Checks whether a process has completed in the allotted time
+        Checks whether a process has completed in the allotted time. Checks status every 5 seconds
             Parameters:
                     process_id (int): the id of the process to check
                     timeout (int): the number of seconds till a timeout error is called
@@ -365,8 +336,8 @@ class MockRobotDriver:
         # start a timer
         t0 = t1 = time.time()
         while status != ProcessStatus.FINISHED_SUCCESSFULLY:
-            # check every ten seconds? we could make this variable too
-            time.sleep(10)
+            # check every five seconds? we could make this variable too
+            time.sleep(5)
             status = self.get_status(process_id)
             # this case also catches the Terminated with Error response
             if status == ProcessStatus.TERMINATED_WITH_ERROR:
@@ -412,6 +383,39 @@ class MockRobotDriver:
         except Exception as e:
             return f"Error: Failed to retrieve status: {str(e)}"
 
+    def validate_inputs(self, operation, parameter_names, parameter_values):
+        """
+        UI mapped function. When a user presses the “Execute Operation” button, the UI calls this function and expects
+        that the Device Driver will perform an operation determined by the parameter operation.
+        Checks the instrument for ready state and parses the operation information into the correct robotic command
+            Parameters:
+                    operation (Operation): a string of enum type Operation defining which operation is to be completed
+                    parameter_names ([str]):  array containing the name of each parameter to be used for the transfer
+                    parameter_values ([int]): array containing the value of each parameter to be used for the transfer
+            Returns:
+                    (bool, str) : True for valid false for invalid, Validation error or validation success message
+        """
+        # validate operation
+        if not isinstance(operation, Operation):
+            logging.error("Validation Error: Invalid operation. Supported operations are Pick, Place, and Transfer.")
+            return False, "Validation Error: Invalid operation. Supported operations are Pick, Place, and Transfer."
+        # validate parameter names
+        for name in parameter_names:
+            if name not in self.valid_names:
+                logging.error(f"Validation Error: Invalid parameter name: {name}. Select from valid names: {self.valid_names}")
+                return False, f"Validation Error: Invalid parameter name: {name}. Select from valid names: {self.valid_names}"
+        # validate parameter values
+        for value in parameter_values:
+            if value not in self.valid_range:
+                logging.error(f"Validation Error: Invalid parameter value: {value}. Select from valid range: {self.valid_range}")
+                return False, f"Validation Error: Invalid parameter value: {value}. Select from valid range: {self.valid_range}"
+
+        # add any other validation here.
+        # Can you pick and place to/from same location?
+        # Can you place before you pick?
+        # Could a user accidentally send more than one location for a pick or place?
+
+        return True, "Inputs validated"
 
 
 
