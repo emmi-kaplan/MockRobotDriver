@@ -111,26 +111,17 @@ class MockRobotDriver:
             self.homed = False
             # I decided we should let them home more than once
             # return "Error: MockRobot already initialized."
+
         # Send Initialize command to MockRobot, timeout at 2 minutes
         response = self.try_process("home", 120)
-        # If response is a Process_id, Initialization process commenced successfully. Monitor for completion
-        if isinstance(response, int):
-            process_id = response
-            logging.info(f"Initialization process started. ProcessID: {process_id}")
-            # Monitor status of process, timeout after 2 minutes
-            status = self.monitor_process_completion(process_id, 120)
-            if status == ProcessStatus.FINISHED_SUCCESSFULLY:
-                # track whether the robot has been homed for future processes
-                self.homed = True
-                logging.info(f"Initialization process: {process_id} finished successfully!")
-                return ""
-            # The process started but errored before it finished, return error
-            else:
-                return f"Initialization started but program errored before completion: {status}"
-        # Not an int means an error was encountered before the process started, return that error
+        # If response is not "", an error occurred. Log error
+        if response != "":
+            logging.error(f"Initialization command failed: {response}")
+            # return specific error
+            return f"Initialization command failed: {response}"
         else:
-            logging.error(f"{response}")
-            return f"Initialization not started: {response}"
+            # successful pick
+            return ""
 
     def ExecuteOperation(self, operation, parameter_names, parameter_values):
         """
@@ -158,7 +149,7 @@ class MockRobotDriver:
             logging.error("Error: MockRobot is not initialized. Press 'Initialize' and then try your request again.")
             return "Error: MockRobot is not initialized. Press 'Initialize' and then try your request again."
 
-        # Check if there is current process running
+        # Check if there is current process running (currently not possible to hit this)
         if self.current_process is not None:
             return _process_running_error(self.current_process)
 
